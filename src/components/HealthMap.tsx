@@ -7,7 +7,7 @@ import {
   hexbinData,
   diseases,
   generateUniformHexGrid,
-  WAYNE_LAND_SIMPLIFIED, // optional clip (land only)
+  WAYNE_LAND_SIMPLIFIED,
 } from "../data/mockData";
 
 // fix leaflet marker URLs
@@ -31,29 +31,30 @@ type Hex = {
 export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
   const [activeDisease, setActiveDisease] = useState<string>("all");
   const [hexGrid, setHexGrid] = useState<Hex[]>([]);
-  const center: [number, number] = [42.35, -83.20]; // Wayne centroid-ish
+  const center: [number, number] = [42.35, -83.2];
 
   useEffect(() => {
-    // smaller hexes and tighter coverage look better on dark maps
     const grid = generateUniformHexGrid(0.0019); // ~200–250m hex radius
     setHexGrid(grid as Hex[]);
   }, []);
 
-  // merge your handcrafted neighborhood hexbins with the generated grid
   const allHexbins: Hex[] = useMemo(() => [...hexbinData, ...hexGrid], [hexGrid]);
 
-  // optional: clip to Wayne County land polygon (prevents water tiles)
+  // ——— CLIP to Wayne land polygon (no Leaflet .contains; use pure JS) ———
   const clippedHexbins = useMemo(() => {
-    if (!WAYNE_LAND_SIMPLIFIED) return allHexbins;
-    const poly = L.polygon(WAYNE_LAND_SIMPLIFIED as any);
+    const land = (WAYNE_LAND_SIMPLIFIED || []) as [number, number][];
+    if (!land.length) return allHexbins;
+
+    const b = boundsOf(land);
     return allHexbins.filter((h) => {
-      // centroid test is fast and good enough here
       const c = centroid(h.coordinates);
-      return poly.getBounds().contains(c as any) && leafletPointInPolygon(c, poly);
+      // quick bbox check first
+      if (!inBounds(c, b)) return false;
+      // ray-cast on the land ring
+      return pointInPolygon(c, land);
     });
   }, [allHexbins]);
 
-  // filter by disease if a chip is selected
   const filtered: Hex[] =
     activeDisease === "all"
       ? clippedHexbins
@@ -61,7 +62,7 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
           h.diseases.some((d) => d.name.toLowerCase() === activeDisease.toLowerCase())
         );
 
-  // scale factors for the health “signal”
+  // normalize article counts (for signal)
   const { minArticles, maxArticles } = useMemo(() => {
     let mins = Number.POSITIVE_INFINITY,
       maxs = Number.NEGATIVE_INFINITY;
@@ -72,30 +73,25 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
     return { minArticles: mins === Infinity ? 0 : mins, maxArticles: maxs === -Infinity ? 1 : maxs };
   }, [clippedHexbins]);
 
-  // color ramp — dark theme, PCFD vibe but tuned for black basemap
+  // diverging ramp tuned for dark basemap
   const STOPS: [number, string][] = [
-    [0.0, "#0f2d2a"], // deep green
+    [0.0, "#0f2d2a"],
     [0.2, "#235c51"],
-    [0.4, "#7fb89f"], // seafoam
-    [0.6, "#eee3b6"], // sand
-    [0.8, "#e3a985"], // peach
-    [1.0, "#b45767"], // rose
+    [0.4, "#7fb89f"],
+    [0.6, "#eee3b6"],
+    [0.8, "#e3a985"],
+    [1.0, "#b45767"],
   ];
 
   function hexSignal(h: Hex): number {
-    // prevalence (avg across diseases) -> 0..1
-    const prev = h.diseases.reduce((s, d) => s + d.prevalence, 0) / (h.diseases.length || 1);
+    const prev = h.diseases.reduce((s, d) => s + d.prevalence, 0) / (h.diseases.length || 1); // 0..100
     const prev01 = clamp(prev / 100, 0, 1);
-    // trends (already 0..100) -> 0..1
     const trend01 = clamp(h.googleTrendsScore / 100, 0, 1);
-    // articles normalized over the sample
     const art01 = clamp((h.articleCount - minArticles) / Math.max(1, maxArticles - minArticles), 0, 1);
-    // weights tuned for a pleasant surface
     return 0.55 * prev01 + 0.25 * trend01 + 0.20 * art01;
   }
 
   function colorFor(v: number): string {
-    // piecewise lerp across STOPS
     const x = clamp(v, 0, 1);
     for (let i = 1; i < STOPS.length; i++) {
       const [p0, c0] = STOPS[i - 1];
@@ -147,33 +143,21 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
       </div>
 
       <div className="h-[600px] rounded-lg overflow-hidden border border-gray-700">
-        <MapContainer
-          center={center}
-          zoom={10}
-          style={{ height: "100%", width: "100%" }}
-          zoomControl={false}
-          preferCanvas
-        >
+        <MapContainer center={center} zoom={10} style={{ height: "100%", width: "100%" }} zoomControl={false} preferCanvas>
           <TileLayer
-            // CARTO dark basemap
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
           />
 
-          {/* make hex layer blend softly */}
+          {/* hex layer with soft blending */}
           <Pane name="hexes" style={{ mixBlendMode: "multiply" }}>
             {filtered.map((hex, i) => {
               const s = hexSignal(hex);
-              const fill = colorFor(s);
               return (
                 <Polygon
                   key={i}
                   positions={hex.coordinates}
-                  pathOptions={{
-                    stroke: false, // << no outlines!
-                    fillColor: fill,
-                    fillOpacity: 0.72, // soft, lets the base map peek through
-                  }}
+                  pathOptions={{ stroke: false, fillColor: colorFor(s), fillOpacity: 0.72 }}
                 >
                   <Tooltip direction="top" sticky>
                     <div className="bg-gray-900/90 p-2 rounded">
@@ -228,7 +212,18 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
   );
 }
 
-/* ---------- helpers ---------- */
+/* ---------- helpers (pure JS; no Leaflet .contains) ---------- */
+
+// centroid of a hex
+function centroid(coords: [number, number][]): [number, number] {
+  let x = 0,
+    y = 0;
+  for (const [lat, lng] of coords) {
+    x += lat;
+    y += lng;
+  }
+  return [x / coords.length, y / coords.length];
+}
 
 function clamp(x: number, a: number, b: number) {
   return Math.max(a, Math.min(b, x));
@@ -251,21 +246,38 @@ function lerpHex(c0: string, c1: string, t: number) {
   return rgbToHex(lerp(r0, r1, t), lerp(g0, g1, t), lerp(b0, b1, t));
 }
 
-// quick centroid of a hex (leaflet latlng order)
-function centroid(coords: [number, number][]): [number, number] {
-  let x = 0,
-    y = 0;
-  for (const [lat, lng] of coords) {
-    x += lat;
-    y += lng;
+// simple bbox for a ring
+function boundsOf(ring: [number, number][]) {
+  let minLat = Infinity,
+    maxLat = -Infinity,
+    minLng = Infinity,
+    maxLng = -Infinity;
+  for (const [lat, lng] of ring) {
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+    minLng = Math.min(minLng, lng);
+    maxLng = Math.max(maxLng, lng);
   }
-  return [x / coords.length, y / coords.length];
+  return { minLat, maxLat, minLng, maxLng };
 }
 
-// point-in-polygon using Leaflet (works even with holes)
-function leafletPointInPolygon(pt: [number, number], poly: L.Polygon): boolean {
-  const latlng = L.latLng(pt[0], pt[1]);
-  return poly.getLatLngs().some((ring: any) => L.polygon(ring).contains(latlng));
+function inBounds(pt: [number, number], b: { minLat: number; maxLat: number; minLng: number; maxLng: number }) {
+  const [lat, lng] = pt;
+  return lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng;
+}
+
+// ray-casting point-in-polygon; treat x=lng, y=lat
+function pointInPolygon(pt: [number, number], ring: [number, number][]) {
+  const x = pt[1];
+  const y = pt[0];
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][1], yi = ring[i][0];
+    const xj = ring[j][1], yj = ring[j][0];
+    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 export default HealthMap;
