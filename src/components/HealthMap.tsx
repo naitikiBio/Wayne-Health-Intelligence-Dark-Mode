@@ -1,16 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { MapContainer, TileLayer, Polygon, Tooltip, Marker, Popup, Pane } from "react-leaflet";
+import { MapContainer, TileLayer, Polygon, Tooltip, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { motion } from "framer-motion";
 import L from "leaflet";
-import {
-  hexbinData,
-  diseases,
-  generateUniformHexGrid,
-  WAYNE_LAND_SIMPLIFIED,
-} from "../data/mockData";
+import { hexbinData, diseases, generateUniformHexGrid } from "../data/mockData";
 
-// fix leaflet marker URLs
+// Leaflet marker icon fix
 // @ts-ignore
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -25,63 +20,72 @@ type Hex = {
   coordinates: [number, number][];
   diseases: DiseaseBin[];
   articleCount: number;
-  googleTrendsScore: number; // 0–100
+  googleTrendsScore: number;
 };
 
-export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
+export default function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
   const [activeDisease, setActiveDisease] = useState<string>("all");
   const [hexGrid, setHexGrid] = useState<Hex[]>([]);
   const center: [number, number] = [42.35, -83.2];
 
   useEffect(() => {
-    const grid = generateUniformHexGrid(0.0019); // ~200–250m hex radius
-    setHexGrid(grid as Hex[]);
+    // IMPORTANT: Call your generator with no args (matches your mockData implementation)
+    const grid = generateUniformHexGrid() as unknown as Hex[];
+    setHexGrid(grid);
   }, []);
 
   const allHexbins: Hex[] = useMemo(() => [...hexbinData, ...hexGrid], [hexGrid]);
+  console.debug("hexes -> sample:", hexbinData.length, "generated:", hexGrid.length, "total:", allHexbins.length);
 
-  // ——— CLIP to Wayne land polygon (no Leaflet .contains; use pure JS) ———
-  const clippedHexbins = useMemo(() => {
-    const land = (WAYNE_LAND_SIMPLIFIED || []) as [number, number][];
-    if (!land.length) return allHexbins;
-
-    const b = boundsOf(land);
-    return allHexbins.filter((h) => {
-      const c = centroid(h.coordinates);
-      // quick bbox check first
-      if (!inBounds(c, b)) return false;
-      // ray-cast on the land ring
-      return pointInPolygon(c, land);
-    });
-  }, [allHexbins]);
-
+  // Filter by disease pill
   const filtered: Hex[] =
     activeDisease === "all"
-      ? clippedHexbins
-      : clippedHexbins.filter((h) =>
+      ? allHexbins
+      : allHexbins.filter((h) =>
           h.diseases.some((d) => d.name.toLowerCase() === activeDisease.toLowerCase())
         );
 
-  // normalize article counts (for signal)
-  const { minArticles, maxArticles } = useMemo(() => {
-    let mins = Number.POSITIVE_INFINITY,
-      maxs = Number.NEGATIVE_INFINITY;
-    for (const h of clippedHexbins) {
-      mins = Math.min(mins, h.articleCount);
-      maxs = Math.max(maxs, h.articleCount);
-    }
-    return { minArticles: mins === Infinity ? 0 : mins, maxArticles: maxs === -Infinity ? 1 : maxs };
-  }, [clippedHexbins]);
-
-  // diverging ramp tuned for dark basemap
+  // Smooth dark-theme ramp (works without blend modes)
   const STOPS: [number, string][] = [
-    [0.0, "#0f2d2a"],
-    [0.2, "#235c51"],
-    [0.4, "#7fb89f"],
-    [0.6, "#eee3b6"],
-    [0.8, "#e3a985"],
-    [1.0, "#b45767"],
+    [0.0, "#1b2a2f"], // deep teal
+    [0.25, "#2d6a6a"],
+    [0.5, "#9dd3bf"],
+    [0.7, "#ecdcae"],
+    [0.85, "#e39f77"],
+    [1.0, "#b64d62"], // rose
   ];
+
+  function clamp(x: number, a: number, b: number) {
+    return Math.max(a, Math.min(b, x));
+  }
+  function lerp(a: number, b: number, t: number) {
+    return a + (b - a) * t;
+  }
+  function hexToRgb(h: string) {
+    const s = h.replace("#", "");
+    const n = parseInt(s, 16);
+    return [n >> 16, (n >> 8) & 255, n & 255];
+  }
+  function rgbToHex(r: number, g: number, b: number) {
+    const v = (Math.round(r) << 16) + (Math.round(g) << 8) + Math.round(b);
+    return `#${v.toString(16).padStart(6, "0")}`;
+  }
+  function lerpHex(c0: string, c1: string, t: number) {
+    const [r0, g0, b0] = hexToRgb(c0);
+    const [r1, g1, b1] = hexToRgb(c1);
+    return rgbToHex(lerp(r0, r1, t), lerp(g0, g1, t), lerp(b0, b1, t));
+  }
+
+  // normalize Article counts for signal
+  const { minArticles, maxArticles } = useMemo(() => {
+    let min = Number.POSITIVE_INFINITY,
+      max = Number.NEGATIVE_INFINITY;
+    for (const h of allHexbins) {
+      min = Math.min(min, h.articleCount);
+      max = Math.max(max, h.articleCount);
+    }
+    return { minArticles: isFinite(min) ? min : 0, maxArticles: isFinite(max) ? max : 1 };
+  }, [allHexbins]);
 
   function hexSignal(h: Hex): number {
     const prev = h.diseases.reduce((s, d) => s + d.prevalence, 0) / (h.diseases.length || 1); // 0..100
@@ -91,13 +95,13 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
     return 0.55 * prev01 + 0.25 * trend01 + 0.20 * art01;
   }
 
-  function colorFor(v: number): string {
-    const x = clamp(v, 0, 1);
+  function colorFor(x: number) {
+    const v = clamp(x, 0, 1);
     for (let i = 1; i < STOPS.length; i++) {
       const [p0, c0] = STOPS[i - 1];
       const [p1, c1] = STOPS[i];
-      if (x <= p1) {
-        const t = (x - p0) / (p1 - p0);
+      if (v <= p1) {
+        const t = (v - p0) / (p1 - p0);
         return lerpHex(c0, c1, t);
       }
     }
@@ -108,14 +112,13 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.5, delay: 0.1 }}
+      transition={{ duration: 0.45 }}
       className="bg-gray-800 rounded-lg shadow-lg p-6"
     >
       <div className="mb-4">
         <h2 className="text-xl font-semibold text-white mb-2">Health Trends Map</h2>
         <p className="text-gray-400 mb-4">
-          Visualization of health trends across Wayne County, Michigan. Darker colors indicate higher
-          prevalence/attention.
+          Visualization of health trends across Wayne County, Michigan. Darker colors indicate higher prevalence/attention.
         </p>
         <div className="flex flex-wrap gap-2 mb-4">
           <button
@@ -143,41 +146,39 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
       </div>
 
       <div className="h-[600px] rounded-lg overflow-hidden border border-gray-700">
-        <MapContainer center={center} zoom={10} style={{ height: "100%", width: "100%" }} zoomControl={false} preferCanvas>
+        <MapContainer center={center} zoom={10} zoomControl={false} style={{ height: "100%", width: "100%" }}>
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
           />
 
-          {/* hex layer with soft blending */}
-          <Pane name="hexes" style={{ mixBlendMode: "multiply" }}>
-            {filtered.map((hex, i) => {
-              const s = hexSignal(hex);
-              return (
-                <Polygon
-                  key={i}
-                  positions={hex.coordinates}
-                  pathOptions={{ stroke: false, fillColor: colorFor(s), fillOpacity: 0.72 }}
-                >
-                  <Tooltip direction="top" sticky>
-                    <div className="bg-gray-900/90 p-2 rounded">
-                      <div className="text-white font-semibold">{hex.location}</div>
-                      <div className="text-xs text-gray-200 mt-1">
-                        {hex.diseases.map((d, j) => (
-                          <div key={j} className="flex justify-between">
-                            <span>{d.name}</span>
-                            <span className="font-semibold ml-2">{d.prevalence}%</span>
-                          </div>
-                        ))}
-                        <div className="mt-1">Articles: {hex.articleCount}</div>
-                        <div>Trends: {hex.googleTrendsScore}</div>
-                      </div>
+          {/* HEX SURFACE – no clipping, no blend mode, very light stroke off */}
+          {filtered.map((hex, i) => {
+            const s = hexSignal(hex);
+            return (
+              <Polygon
+                key={i}
+                positions={hex.coordinates}
+                pathOptions={{ stroke: false, fillColor: colorFor(s), fillOpacity: 0.9 }}
+              >
+                <Tooltip direction="top" sticky>
+                  <div className="bg-gray-900/90 p-2 rounded">
+                    <div className="text-white font-semibold">{hex.location}</div>
+                    <div className="text-xs text-gray-200 mt-1">
+                      {hex.diseases.map((d, j) => (
+                        <div key={j} className="flex justify-between">
+                          <span>{d.name}</span>
+                          <span className="font-semibold ml-2">{d.prevalence}%</span>
+                        </div>
+                      ))}
+                      <div className="mt-1">Articles: {hex.articleCount}</div>
+                      <div>Trends: {hex.googleTrendsScore}</div>
                     </div>
-                  </Tooltip>
-                </Polygon>
-              );
-            })}
-          </Pane>
+                  </div>
+                </Tooltip>
+              </Polygon>
+            );
+          })}
 
           {selectedBusiness && (
             <Marker position={[selectedBusiness.lat, selectedBusiness.lng]}>
@@ -199,8 +200,7 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
           <div
             className="h-3 w-56 rounded"
             style={{
-              background:
-                "linear-gradient(90deg,#0f2d2a,#235c51,#7fb89f,#eee3b6,#e3a985,#b45767)",
+              background: "linear-gradient(90deg,#1b2a2f,#2d6a6a,#9dd3bf,#ecdcae,#e39f77,#b64d62)",
             }}
           />
           <span className="text-xs text-gray-400 ml-1">Low</span>
@@ -211,73 +211,3 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
     </motion.div>
   );
 }
-
-/* ---------- helpers (pure JS; no Leaflet .contains) ---------- */
-
-// centroid of a hex
-function centroid(coords: [number, number][]): [number, number] {
-  let x = 0,
-    y = 0;
-  for (const [lat, lng] of coords) {
-    x += lat;
-    y += lng;
-  }
-  return [x / coords.length, y / coords.length];
-}
-
-function clamp(x: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, x));
-}
-function hexToRgb(h: string) {
-  const s = h.replace("#", "");
-  const n = parseInt(s, 16);
-  return [n >> 16, (n >> 8) & 255, n & 255];
-}
-function rgbToHex(r: number, g: number, b: number) {
-  const v = (r << 16) + (g << 8) + b;
-  return `#${v.toString(16).padStart(6, "0")}`;
-}
-function lerp(a: number, b: number, t: number) {
-  return Math.round(a + (b - a) * t);
-}
-function lerpHex(c0: string, c1: string, t: number) {
-  const [r0, g0, b0] = hexToRgb(c0);
-  const [r1, g1, b1] = hexToRgb(c1);
-  return rgbToHex(lerp(r0, r1, t), lerp(g0, g1, t), lerp(b0, b1, t));
-}
-
-// simple bbox for a ring
-function boundsOf(ring: [number, number][]) {
-  let minLat = Infinity,
-    maxLat = -Infinity,
-    minLng = Infinity,
-    maxLng = -Infinity;
-  for (const [lat, lng] of ring) {
-    minLat = Math.min(minLat, lat);
-    maxLat = Math.max(maxLat, lat);
-    minLng = Math.min(minLng, lng);
-    maxLng = Math.max(maxLng, lng);
-  }
-  return { minLat, maxLat, minLng, maxLng };
-}
-
-function inBounds(pt: [number, number], b: { minLat: number; maxLat: number; minLng: number; maxLng: number }) {
-  const [lat, lng] = pt;
-  return lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng;
-}
-
-// ray-casting point-in-polygon; treat x=lng, y=lat
-function pointInPolygon(pt: [number, number], ring: [number, number][]) {
-  const x = pt[1];
-  const y = pt[0];
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][1], yi = ring[i][0];
-    const xj = ring[j][1], yj = ring[j][0];
-    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-export default HealthMap;
