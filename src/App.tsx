@@ -26,7 +26,7 @@ export function App() {
       }} className="max-w-7xl mx-auto">
           <div className="mb-6">
             <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
-              Wayne County Health Insights
+              Health Insights
             </h1>
             <p className="text-lg text-gray-400">
               Discover local health trends and calculate the potential impact on
