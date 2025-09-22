@@ -54,7 +54,7 @@ interface Disease {
 export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business }) {
   const [activeDisease, setActiveDisease] = useState<string>("all");
   const [hexGrid, setHexGrid] = useState<Hex[]>([]);
-  const center: [number, number] = [42.30, -83.25];
+  const center: [number, number] = [42.25, -83.17]; // Centered on Detroit/Wayne County
 
   useEffect(() => {
     // IMPORTANT: Call your generator with no args (matches your mockData implementation)
@@ -73,14 +73,14 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business })
           h.diseases.some((d) => d.name.toLowerCase() === activeDisease.toLowerCase())
         );
 
-  // Smooth dark-theme ramp (works without blend modes)
+  // Color scale for health signal intensity
   const STOPS: [number, string][] = [
-    [0.0, "#1b2a2f"], // deep teal
-    [0.25, "#2d6a6a"],
-    [0.5, "#9dd3bf"],
-    [0.7, "#ecdcae"],
-    [0.85, "#e39f77"],
-    [1.0, "#b64d62"], // rose
+    [0.0, "#4AA784"],  // Low signal (cool/quiet): green
+    [0.2, "#BFE2C7"],  // Low-medium: mint
+    [0.4, "#F2EFC6"],  // Medium: sand
+    [0.6, "#F2C49A"],  // Medium-high: peach
+    [0.8, "#E29578"],  // High: salmon
+    [1.0, "#C0546A"],  // Very high (hotspot): rose
   ];
 
   function clamp(x: number, a: number, b: number) {
@@ -116,11 +116,16 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business })
   }, [allHexbins]);
 
   function hexSignal(h: Hex): number {
-    const prev = h.diseases.reduce((s, d) => s + d.prevalence, 0) / (h.diseases.length || 1); // 0..100
-    const prev01 = clamp(prev / 100, 0, 1);
-    const trend01 = clamp(h.googleTrendsScore / 100, 0, 1);
-    const art01 = clamp((h.articleCount - minArticles) / Math.max(1, maxArticles - minArticles), 0, 1);
-    return 0.55 * prev01 + 0.25 * trend01 + 0.20 * art01;
+    // NewsDensity: 50% weight
+    const newsDensity = clamp((h.articleCount - minArticles) / Math.max(1, maxArticles - minArticles), 0, 1);
+    
+    // GoogleTrends: 30% weight
+    const googleTrends = clamp(h.googleTrendsScore / 100, 0, 1);
+    
+    // Disease prevalence acts as social chatter proxy: 20% weight
+    const socialChatter = h.diseases.reduce((s, d) => s + d.prevalence, 0) / (h.diseases.length || 1) / 100;
+    
+    return 0.50 * newsDensity + 0.30 * googleTrends + 0.20 * socialChatter;
   }
 
   function colorFor(x: number) {
@@ -176,10 +181,15 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business })
       <div className="h-[600px] rounded-lg overflow-hidden border border-gray-700">
         <MapContainer 
           center={center} 
-          zoom={11} 
+          zoom={12} 
           zoomControl={true} 
           style={{ height: "100%", width: "100%" }}
           scrollWheelZoom={true}
+          maxBounds={[
+            [42.050, -83.440], // Southwest corner
+            [42.450, -82.910]  // Northeast corner
+          ]}
+          maxBoundsViscosity={1.0}
         >
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
