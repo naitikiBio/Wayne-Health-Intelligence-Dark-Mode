@@ -85,40 +85,123 @@ export const socialMediaData = [
 ];
 
 // —— uniform hex grid generator ——
+// Location regions in Wayne County
+const REGIONS = [
+  { name: "Detroit Downtown", center: [-83.045, 42.331], radius: 0.02 },
+  { name: "Detroit Midtown", center: [-83.060, 42.351], radius: 0.015 },
+  { name: "Detroit East", center: [-83.000, 42.360], radius: 0.02 },
+  { name: "Dearborn", center: [-83.176, 42.322], radius: 0.025 },
+  { name: "Livonia", center: [-83.353, 42.368], radius: 0.025 },
+  { name: "Taylor", center: [-83.269, 42.240], radius: 0.02 },
+  { name: "Westland", center: [-83.380, 42.324], radius: 0.02 },
+  { name: "Grosse Pointe", center: [-82.916, 42.384], radius: 0.02 }
+];
+
+function getLocationName([lat, lng]) {
+  for (const region of REGIONS) {
+    const d = Math.sqrt(
+      Math.pow(lng - region.center[0], 2) + 
+      Math.pow(lat - region.center[1], 2)
+    );
+    if (d <= region.radius) {
+      return region.name;
+    }
+  }
+  return "Wayne County";
+}
+
+// Wayne County boundary coordinates (simplified for performance)
+const WAYNE_COUNTY_BOUNDARY = [
+  [-83.437, 42.351], // Western edge near Westland
+  [-83.317, 42.438], // Northwest corner
+  [-83.153, 42.450], // North Detroit
+  [-82.910, 42.339], // Grosse Pointe
+  [-82.945, 42.050], // Lake Erie shoreline
+  [-83.247, 42.057], // South Detroit River
+  [-83.437, 42.238], // Southwest Wayne
+  [-83.437, 42.351]  // Back to start
+];
+
 // Convert meters to degrees (approximate at Detroit's latitude)
 const METERS_TO_DEGREES = 1 / 111111;  // roughly 1 degree = 111.111 km at equator
 const HEX_RADIUS_M = 275; // 275 meters radius as specified
 const HEX_SIZE_DEG = HEX_RADIUS_M * METERS_TO_DEGREES;
 
+// Point in polygon test
+function isPointInPolygon(point, polygon) {
+  const x = point[0], y = point[1];
+  let inside = false;
+  
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1];
+    const xj = polygon[j][0], yj = polygon[j][1];
+    
+    const intersect = ((yi > y) !== (yj > y))
+        && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  
+  return inside;
+}
+
+// Check if hex center is in Wayne County
+function isHexInWayneCounty(center) {
+  return isPointInPolygon(center, WAYNE_COUNTY_BOUNDARY);
+}
+
 export function generateUniformHexGrid(hexSize = HEX_SIZE_DEG) {
   // Precise bounds for Wayne County
-  const north = 42.450, south = 42.050;  // Adjusted to cover from River Rouge to Grosse Pointe
-  const west = -83.440, east = -82.910;   // From Westland to Lake St. Clair
+  const north = 42.450, south = 42.050;
+  const west = -83.437, east = -82.910;
   
   // Calculate hex dimensions
   const height = hexSize * Math.sqrt(3);
   const width = hexSize * 2;
 
-  const grid = [];
-  let row = 0;
-  for (let lat = south; lat <= north; lat += height * 0.75) {
-    const offset = (row % 2 === 0) ? 0 : width / 2;
-    for (let lng = west; lng <= east; lng += width) {
-      const cLat = lat;
-      const cLng = lng + offset;
-      const verts = hexVerts(cLat, cLng, hexSize);
-      const diseases = randomDiseaseSet();
-      grid.push({
-        location: determineLocation(cLat, cLng),
-        coordinates: verts,
-        diseases,
-        articleCount: Math.floor(Math.random() * 30) + 12,
-        googleTrendsScore: Math.floor(Math.random() * 50) + 35,
+  const hexes = [];
+  for (let row = 0; row * height + south <= north; row++) {
+    for (let col = 0; col * width + west <= east; col++) {
+      const evenRow = row % 2 === 0;
+      
+      // Base point + hex offset
+      const lng = west + col * width + (evenRow ? 0 : width/2);
+      const lat = south + row * height;
+      
+      // Skip hexes outside Wayne County
+      if (!isHexInWayneCounty([lng, lat])) {
+        continue;
+      }
+      
+      // Generate hex vertices
+      const vertices = [];
+      for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 3 * i;
+        const vLng = lng + hexSize * Math.cos(angle);
+        const vLat = lat + hexSize * Math.sin(angle) * Math.cos(lat * Math.PI / 180);
+        vertices.push([vLat, vLng]);
+      }
+      vertices.push(vertices[0]); // Close the polygon
+      
+      // Generate mock data for this hex
+      const numDiseases = Math.floor(Math.random() * 3) + 1;
+      const hexDiseases = diseases
+        .sort(() => Math.random() - 0.5)
+        .slice(0, numDiseases)
+        .map(d => ({
+          name: d.name,
+          prevalence: Math.random() * 60 + 20 // 20-80% range
+        }));
+
+      hexes.push({
+        location: getLocationName([lat, lng]),
+        coordinates: vertices,
+        diseases: hexDiseases,
+        articleCount: Math.floor(Math.random() * 50),
+        googleTrendsScore: Math.random() * 100
       });
     }
-    row++;
   }
-  return grid;
+  return hexes;
 }
 
 function hexVerts(lat, lng, r) {
