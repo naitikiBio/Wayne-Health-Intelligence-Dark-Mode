@@ -85,9 +85,17 @@ export const socialMediaData = [
 ];
 
 // —— uniform hex grid generator ——
-export function generateUniformHexGrid(hexSize = 0.03) {
-  // bounds around Wayne County
-  const north = 42.45, south = 42.15, west = -83.50, east = -83.00;
+// Convert meters to degrees (approximate at Detroit's latitude)
+const METERS_TO_DEGREES = 1 / 111111;  // roughly 1 degree = 111.111 km at equator
+const HEX_RADIUS_M = 275; // 275 meters radius as specified
+const HEX_SIZE_DEG = HEX_RADIUS_M * METERS_TO_DEGREES;
+
+export function generateUniformHexGrid(hexSize = HEX_SIZE_DEG) {
+  // Precise bounds for Wayne County
+  const north = 42.450, south = 42.050;  // Adjusted to cover from River Rouge to Grosse Pointe
+  const west = -83.440, east = -82.910;   // From Westland to Lake St. Clair
+  
+  // Calculate hex dimensions
   const height = hexSize * Math.sqrt(3);
   const width = hexSize * 2;
 
