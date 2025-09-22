@@ -85,9 +85,9 @@ export const socialMediaData = [
 ];
 
 // —— uniform hex grid generator ——
-export function generateUniformHexGrid(hexSize = 0.015) {
+export function generateUniformHexGrid(hexSize = 0.03) {
   // bounds around Wayne County
-  const north = 42.50, south = 42.10, west = -83.60, east = -82.90;
+  const north = 42.45, south = 42.15, west = -83.50, east = -83.00;
   const height = hexSize * Math.sqrt(3);
   const width = hexSize * 2;
 

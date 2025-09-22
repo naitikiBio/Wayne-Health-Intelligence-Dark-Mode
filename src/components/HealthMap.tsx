@@ -26,7 +26,7 @@ type Hex = {
 export default function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
   const [activeDisease, setActiveDisease] = useState<string>("all");
   const [hexGrid, setHexGrid] = useState<Hex[]>([]);
-  const center: [number, number] = [42.30, -83.15];
+  const center: [number, number] = [42.30, -83.25];
 
   useEffect(() => {
     // IMPORTANT: Call your generator with no args (matches your mockData implementation)
@@ -146,10 +146,16 @@ export default function HealthMap({ selectedBusiness }: { selectedBusiness?: any
       </div>
 
       <div className="h-[600px] rounded-lg overflow-hidden border border-gray-700">
-        <MapContainer center={center} zoom={11} zoomControl={false} style={{ height: "100%", width: "100%" }}>
+        <MapContainer 
+          center={center} 
+          zoom={11} 
+          zoomControl={true} 
+          style={{ height: "100%", width: "100%" }}
+          scrollWheelZoom={true}
+        >
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
           {/* HEX SURFACE – no clipping, no blend mode, very light stroke off */}
@@ -159,7 +165,13 @@ export default function HealthMap({ selectedBusiness }: { selectedBusiness?: any
               <Polygon
                 key={i}
                 positions={hex.coordinates}
-                pathOptions={{ stroke: false, fillColor: colorFor(s), fillOpacity: 0.9 }}
+                pathOptions={{ 
+                  stroke: true,
+                  color: "#374151",
+                  weight: 1,
+                  fillColor: colorFor(s), 
+                  fillOpacity: 0.7 
+                }}
               >
                 <Tooltip direction="top" sticky>
                   <div className="bg-gray-900/90 p-2 rounded">
