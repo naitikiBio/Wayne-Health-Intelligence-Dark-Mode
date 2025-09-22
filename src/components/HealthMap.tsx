@@ -1,9 +1,24 @@
-import React, { useEffect, useMemo, useState } from "react";
+import * as React from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Polygon, Tooltip, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { motion } from "framer-motion";
 import L from "leaflet";
 import { hexbinData, diseases, generateUniformHexGrid } from "../data/mockData";
+
+// Add JSX namespace
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      div: React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>;
+      button: React.DetailedHTMLProps<React.ButtonHTMLAttributes<HTMLButtonElement>, HTMLButtonElement>;
+      h2: React.DetailedHTMLProps<React.HTMLAttributes<HTMLHeadingElement>, HTMLHeadingElement>;
+      p: React.DetailedHTMLProps<React.HTMLAttributes<HTMLParagraphElement>, HTMLParagraphElement>;
+      span: React.DetailedHTMLProps<React.HTMLAttributes<HTMLSpanElement>, HTMLSpanElement>;
+      strong: React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>;
+    }
+  }
+}
 
 // Leaflet marker icon fix
 // @ts-ignore
@@ -23,7 +38,20 @@ type Hex = {
   googleTrendsScore: number;
 };
 
-export default function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
+interface Business {
+  lat: number;
+  lng: number;
+  name: string;
+  address: string;
+}
+
+interface Disease {
+  id: number;
+  name: string;
+  description: string;
+}
+
+export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business }) {
   const [activeDisease, setActiveDisease] = useState<string>("all");
   const [hexGrid, setHexGrid] = useState<Hex[]>([]);
   const center: [number, number] = [42.30, -83.25];
@@ -129,7 +157,7 @@ export default function HealthMap({ selectedBusiness }: { selectedBusiness?: any
           >
             All Diseases
           </button>
-          {diseases.map((d) => (
+          {diseases.map((d: Disease) => (
             <button
               key={d.id}
               onClick={() => setActiveDisease(d.name.toLowerCase())}
