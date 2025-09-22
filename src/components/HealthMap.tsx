@@ -26,7 +26,7 @@ type Hex = {
 export default function HealthMap({ selectedBusiness }: { selectedBusiness?: any }) {
   const [activeDisease, setActiveDisease] = useState<string>("all");
   const [hexGrid, setHexGrid] = useState<Hex[]>([]);
-  const center: [number, number] = [42.35, -83.2];
+  const center: [number, number] = [42.30, -83.15];
 
   useEffect(() => {
     // IMPORTANT: Call your generator with no args (matches your mockData implementation)
@@ -146,7 +146,7 @@ export default function HealthMap({ selectedBusiness }: { selectedBusiness?: any
       </div>
 
       <div className="h-[600px] rounded-lg overflow-hidden border border-gray-700">
-        <MapContainer center={center} zoom={10} zoomControl={false} style={{ height: "100%", width: "100%" }}>
+        <MapContainer center={center} zoom={11} zoomControl={false} style={{ height: "100%", width: "100%" }}>
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
