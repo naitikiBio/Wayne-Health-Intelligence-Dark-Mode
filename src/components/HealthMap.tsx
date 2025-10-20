@@ -200,7 +200,7 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business })
             <span className="text-xs text-gray-400">Low</span>
             <span className="text-xs text-gray-400">High</span>
         </div>
-        <div className="text-xs text-gray-400">Data sources: Mock Google Trends, Social Media, News Articles</div>
+        <div className="text-xs text-gray-400">Data sources: Google Trends, Social Media, News Articles</div>
       </div>
     </motion.div>
   );
