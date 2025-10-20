@@ -1,10 +1,10 @@
 import * as React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { MapContainer, TileLayer, Polygon, Tooltip, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { motion } from "framer-motion";
 import L from "leaflet";
-import { hexbinData, diseases, generateUniformHexGrid } from "../data/mockData";
+import { healthHexbinData } from "../data/mockData";
 
 // Add JSX namespace
 declare global {
@@ -29,13 +29,14 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-type DiseaseBin = { name: string; prevalence: number };
+// Updated Hex type to match the new data structure
 type Hex = {
-  location: string;
+  id: number;
   coordinates: [number, number][];
-  diseases: DiseaseBin[];
-  articleCount: number;
-  googleTrendsScore: number;
+  googleTrends: number;
+  socialMediaChatter: number;
+  newsArticles: number;
+  healthSignal: number;
 };
 
 interface Business {
@@ -45,33 +46,11 @@ interface Business {
   address: string;
 }
 
-interface Disease {
-  id: number;
-  name: string;
-  description: string;
-}
-
 export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business }) {
-  const [activeDisease, setActiveDisease] = useState<string>("all");
-  const [hexGrid, setHexGrid] = useState<Hex[]>([]);
   const center: [number, number] = [42.25, -83.17]; // Centered on Detroit/Wayne County
 
-  useEffect(() => {
-    // IMPORTANT: Call your generator with no args (matches your mockData implementation)
-    const grid = generateUniformHexGrid() as unknown as Hex[];
-    setHexGrid(grid);
-  }, []);
-
-  const allHexbins: Hex[] = useMemo(() => [...hexbinData, ...hexGrid], [hexGrid]);
-  console.debug("hexes -> sample:", hexbinData.length, "generated:", hexGrid.length, "total:", allHexbins.length);
-
-  // Filter by disease pill
-  const filtered: Hex[] =
-    activeDisease === "all"
-      ? allHexbins
-      : allHexbins.filter((h) =>
-          h.diseases.some((d) => d.name.toLowerCase() === activeDisease.toLowerCase())
-        );
+  // The data is now directly from the import
+  const allHexbins: Hex[] = healthHexbinData;
 
   // Color scale for health signal intensity
   const STOPS: [number, string][] = [
@@ -104,28 +83,20 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business })
     return rgbToHex(lerp(r0, r1, t), lerp(g0, g1, t), lerp(b0, b1, t));
   }
 
-  // normalize Article counts for signal
-  const { minArticles, maxArticles } = useMemo(() => {
+  // normalize healthSignal for color scaling
+  const { minSignal, maxSignal } = useMemo(() => {
     let min = Number.POSITIVE_INFINITY,
       max = Number.NEGATIVE_INFINITY;
     for (const h of allHexbins) {
-      min = Math.min(min, h.articleCount);
-      max = Math.max(max, h.articleCount);
+      min = Math.min(min, h.healthSignal);
+      max = Math.max(max, h.healthSignal);
     }
-    return { minArticles: isFinite(min) ? min : 0, maxArticles: isFinite(max) ? max : 1 };
+    return { minSignal: isFinite(min) ? min : 0, maxSignal: isFinite(max) ? max : 1 };
   }, [allHexbins]);
 
-  function hexSignal(h: Hex): number {
-    // NewsDensity: 50% weight
-    const newsDensity = clamp((h.articleCount - minArticles) / Math.max(1, maxArticles - minArticles), 0, 1);
-    
-    // GoogleTrends: 30% weight
-    const googleTrends = clamp(h.googleTrendsScore / 100, 0, 1);
-    
-    // Disease prevalence acts as social chatter proxy: 20% weight
-    const socialChatter = h.diseases.reduce((s, d) => s + d.prevalence, 0) / (h.diseases.length || 1) / 100;
-    
-    return 0.50 * newsDensity + 0.30 * googleTrends + 0.20 * socialChatter;
+  function normalizedSignal(h: Hex): number {
+    const signal = clamp((h.healthSignal - minSignal) / Math.max(1, maxSignal - minSignal), 0, 1);
+    return signal;
   }
 
   function colorFor(x: number) {
@@ -149,45 +120,23 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business })
       className="bg-gray-800 rounded-lg shadow-lg p-6"
     >
       <div className="mb-4">
-        <h2 className="text-xl font-semibold text-white mb-2">Health Trends Map</h2>
+        <h2 className="text-xl font-semibold text-white mb-2">Health Signal Map</h2>
         <p className="text-gray-400 mb-4">
-          Visualization of health trends across Wayne County, Michigan. Darker colors indicate higher prevalence/attention.
+          Health intensity is visualized by hexagons colored by a composite Health Signal Index (HSI).
+          The darker the hexagon, the more intense the health signal.
         </p>
-        <div className="flex flex-wrap gap-2 mb-4">
-          <button
-            onClick={() => setActiveDisease("all")}
-            className={`px-3 py-1 text-sm rounded-full transition-colors ${
-              activeDisease === "all" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-            }`}
-          >
-            All Diseases
-          </button>
-          {diseases.map((d: Disease) => (
-            <button
-              key={d.id}
-              onClick={() => setActiveDisease(d.name.toLowerCase())}
-              className={`px-3 py-1 text-sm rounded-full transition-colors ${
-                activeDisease === d.name.toLowerCase()
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-              }`}
-            >
-              {d.name}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="h-[600px] rounded-lg overflow-hidden border border-gray-700">
         <MapContainer 
           center={center} 
-          zoom={12} 
+          zoom={10} 
           zoomControl={true} 
           style={{ height: "100%", width: "100%" }}
           scrollWheelZoom={true}
           maxBounds={[
-            [42.050, -83.440], // Southwest corner
-            [42.450, -82.910]  // Northeast corner
+            [42.040, -83.560], // Southwest corner
+            [42.451, -82.910]  // Northeast corner
           ]}
           maxBoundsViscosity={1.0}
         >
@@ -196,33 +145,26 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business })
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {/* HEX SURFACE – no clipping, no blend mode, very light stroke off */}
-          {filtered.map((hex, i) => {
-            const s = hexSignal(hex);
+          {/* HEX SURFACE */}
+          {allHexbins.map((hex) => {
+            const signal = normalizedSignal(hex);
             return (
               <Polygon
-                key={i}
-                positions={hex.coordinates}
+                key={hex.id}
+                positions={hex.coordinates as [number, number][]}
                 pathOptions={{ 
-                  stroke: true,
-                  color: "#374151",
-                  weight: 1,
-                  fillColor: colorFor(s), 
-                  fillOpacity: 0.7 
+                  stroke: false,
+                  fillColor: colorFor(signal), 
+                  fillOpacity: 0.6 
                 }}
               >
                 <Tooltip direction="top" sticky>
                   <div className="bg-gray-900/90 p-2 rounded">
-                    <div className="text-white font-semibold">{hex.location}</div>
+                    <div className="text-white font-semibold">Health Signal: {hex.healthSignal.toFixed(2)}</div>
                     <div className="text-xs text-gray-200 mt-1">
-                      {hex.diseases.map((d, j) => (
-                        <div key={j} className="flex justify-between">
-                          <span>{d.name}</span>
-                          <span className="font-semibold ml-2">{d.prevalence}%</span>
-                        </div>
-                      ))}
-                      <div className="mt-1">Articles: {hex.articleCount}</div>
-                      <div>Trends: {hex.googleTrendsScore}</div>
+                      <div>Google Trends: {hex.googleTrends}</div>
+                      <div>Social Chatter: {hex.socialMediaChatter}</div>
+                      <div>News Articles: {hex.newsArticles}</div>
                     </div>
                   </div>
                 </Tooltip>
@@ -246,17 +188,19 @@ export function HealthMap({ selectedBusiness }: { selectedBusiness?: Business })
       {/* legend */}
       <div className="mt-4 flex justify-between items-center">
         <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-400">Health signal:</span>
+          <span className="text-sm text-gray-400">Health Signal Intensity:</span>
           <div
-            className="h-3 w-56 rounded"
+            className="h-4 w-64 rounded-md"
             style={{
-              background: "linear-gradient(90deg,#1b2a2f,#2d6a6a,#9dd3bf,#ecdcae,#e39f77,#b64d62)",
+              background: `linear-gradient(to right, ${STOPS.map(s => s[1]).join(', ')})`,
             }}
           />
-          <span className="text-xs text-gray-400 ml-1">Low</span>
-          <span className="text-xs text-gray-400 ml-8">High</span>
         </div>
-        <div className="text-xs text-gray-400">Data sources: GDELT, Google Trends, CDC</div>
+        <div className="flex justify-between w-64">
+            <span className="text-xs text-gray-400">Low</span>
+            <span className="text-xs text-gray-400">High</span>
+        </div>
+        <div className="text-xs text-gray-400">Data sources: Mock Google Trends, Social Media, News Articles</div>
       </div>
     </motion.div>
   );

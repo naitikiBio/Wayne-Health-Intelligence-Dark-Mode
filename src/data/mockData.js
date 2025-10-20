@@ -23,55 +23,9 @@ export const diseases = [
   { id: 2, name: "Diabetes", description: "Blood sugar regulation disorder" },
   { id: 3, name: "Opioid Use", description: "Opioid addiction and misuse" },
   { id: 4, name: "Depression", description: "Major depressive disorder" },
-  { id: 5, name: "Obesity", description: "Excessive body fat accumulation" },
+  { id: 5, "name": "Obesity", description: "Excessive body fat accumulation" },
   { id: 6, name: "Asthma", description: "Chronic respiratory condition" },
 ];
-
-// —— hand-crafted neighborhood tiles (keep a few for “hot spots”) ——
-export const hexbinData = [
-  {
-    location: "Downtown Detroit",
-    coordinates: [[42.3314, -83.0659],[42.3360, -83.0558],[42.3450, -83.0565],[42.3514, -83.0659],[42.3444,-83.0785],[42.3366,-83.0760]],
-    diseases: [
-      { name: "Hypertension", prevalence: 42 },
-      { name: "Diabetes", prevalence: 28 },
-      { name: "Depression", prevalence: 35 },
-      { name: "Opioid Use", prevalence: 18 },
-    ],
-    articleCount: 45,
-    googleTrendsScore: 72,
-  },
-  {
-    location: "Midtown Detroit",
-    coordinates: [[42.3591,-83.0665],[42.3660,-83.0570],[42.3770,-83.0580],[42.3791,-83.0665],[42.3725,-83.0760],[42.3630,-83.0740]],
-    diseases: [
-      { name: "Depression", prevalence: 40 },
-      { name: "Hypertension", prevalence: 38 },
-      { name: "Asthma", prevalence: 32 },
-      { name: "Obesity", prevalence: 36 },
-    ],
-    articleCount: 38,
-    googleTrendsScore: 65,
-  },
-  {
-    location: "East Side",
-    coordinates: [[42.3691,-83.0089],[42.3760,-82.9999],[42.3870,-83.0020],[42.3891,-83.0289],[42.3800,-83.0385],[42.3725,-83.0300]],
-    diseases: [
-      { name: "Hypertension", prevalence: 41 },
-      { name: "Diabetes", prevalence: 34 },
-      { name: "Depression", prevalence: 31 },
-      { name: "Obesity", prevalence: 38 },
-    ],
-    articleCount: 26,
-    googleTrendsScore: 59,
-  },
-];
-
-// —— Wayne land polygon (very light simplification just for clipping) ——
-export const WAYNE_LAND_SIMPLIFIED = [
-  [42.46,-83.60],[42.46,-83.05],[42.45,-82.93],[42.42,-82.90],[42.35,-82.91],[42.20,-82.95],
-  [42.10,-83.10],[42.10,-83.50],[42.18,-83.60],[42.32,-83.60],[42.42,-83.58]
-]; // not exact; good enough to keep hexes off Lake St. Clair/Detroit River
 
 // —— social media (unchanged from your sample) ——
 export const socialMediaData = [
@@ -84,169 +38,100 @@ export const socialMediaData = [
   { platform: "Instagram", content: "Started my journey to manage hypertension today. Doctor says 30% of adults in our area have high blood pressure. We need more awareness.", date: "5 days ago", sentiment: "neutral", topics: ["Hypertension","Awareness"] },
 ];
 
-// —— uniform hex grid generator ——
-// Location regions in Wayne County
-const REGIONS = [
-  { name: "Detroit Downtown", center: [-83.045, 42.331], radius: 0.02 },
-  { name: "Detroit Midtown", center: [-83.060, 42.351], radius: 0.015 },
-  { name: "Detroit East", center: [-83.000, 42.360], radius: 0.02 },
-  { name: "Dearborn", center: [-83.176, 42.322], radius: 0.025 },
-  { name: "Livonia", center: [-83.353, 42.368], radius: 0.025 },
-  { name: "Taylor", center: [-83.269, 42.240], radius: 0.02 },
-  { name: "Westland", center: [-83.380, 42.324], radius: 0.02 },
-  { name: "Grosse Pointe", center: [-82.916, 42.384], radius: 0.02 }
+// —— LARGE-SCALE HEXAGON DATA GENERATION ——
+
+// Wayne County bounding box
+const WAYNE_COUNTY_BOUNDS = {
+    north: 42.451,
+    south: 42.040,
+    west: -83.560,
+    east: -82.910,
+};
+
+// Simplified polygon for clipping land area (approximates Wayne County without water)
+// Coordinates are [longitude, latitude]
+const WAYNE_LAND_POLYGON = [
+    [-83.56, 42.45], [-83.05, 42.45], [-82.92, 42.44], [-82.91, 42.35],
+    [-83.00, 42.20], [-83.08, 42.10], [-83.20, 42.06], [-83.45, 42.04],
+    [-83.54, 42.15], [-83.56, 42.30]
 ];
 
-function getLocationName([lat, lng]) {
-  for (const region of REGIONS) {
-    const d = Math.sqrt(
-      Math.pow(lng - region.center[0], 2) + 
-      Math.pow(lat - region.center[1], 2)
-    );
-    if (d <= region.radius) {
-      return region.name;
+// Point-in-polygon test
+function isPointInLand(lat, lon, polygon) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const xi = polygon[i][0], yi = polygon[i][1];
+        const xj = polygon[j][0], yj = polygon[j][1];
+
+        const intersect = ((yi > lat) !== (yj > lat))
+            && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
     }
-  }
-  return "Wayne County";
+    return inside;
 }
 
-// Wayne County boundary coordinates (simplified for performance)
-const WAYNE_COUNTY_BOUNDARY = [
-  [-83.437, 42.351], // Western edge near Westland
-  [-83.317, 42.438], // Northwest corner
-  [-83.153, 42.450], // North Detroit
-  [-82.910, 42.339], // Grosse Pointe
-  [-82.945, 42.050], // Lake Erie shoreline
-  [-83.247, 42.057], // South Detroit River
-  [-83.437, 42.238], // Southwest Wayne
-  [-83.437, 42.351]  // Back to start
-];
+// Generate vertices for a single hexagon
+function getHexagonVertices(lat, lon, radius) {
+    const vertices = [];
+    // Correction for latitude distortion on map projection
+    const latCorrection = 1 / Math.cos(lat * Math.PI / 180);
+    for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 180) * (60 * i + 30);
+        const vertexLon = lon + radius * Math.cos(angle) * latCorrection;
+        const vertexLat = lat + radius * Math.sin(angle);
+        vertices.push([vertexLon, vertexLat]);
+    }
+    return vertices;
+}
 
-// Convert meters to degrees (approximate at Detroit's latitude)
-const METERS_TO_DEGREES = 1 / 111111;  // roughly 1 degree = 111.111 km at equator
-const HEX_RADIUS_M = 275; // 275 meters radius as specified
-const HEX_SIZE_DEG = HEX_RADIUS_M * METERS_TO_DEGREES;
-
-// Point in polygon test
-function isPointInPolygon(point, polygon) {
-  const x = point[0], y = point[1];
-  let inside = false;
-  
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i][0], yi = polygon[i][1];
-    const xj = polygon[j][0], yj = polygon[j][1];
+// Main function to generate the large dataset
+function generateHexbinData(rows = 10000) {
+    const data = [];
+    const hexRadiusDegrees = 0.0025; // Approximate radius in decimal degrees. Smaller value = more hexagons.
     
-    const intersect = ((yi > y) !== (yj > y))
-        && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
-  }
-  
-  return inside;
-}
+    // Hexagon geometric properties
+    const hexHeight = hexRadiusDegrees * Math.sqrt(3);
+    const hexWidth = hexRadiusDegrees * 2;
+    const horizontalSpacing = hexWidth * 0.75;
 
-// Check if hex center is in Wayne County
-function isHexInWayneCounty(center) {
-  return isPointInPolygon(center, WAYNE_COUNTY_BOUNDARY);
-}
+    let idCounter = 0;
 
-export function generateUniformHexGrid(hexSize = HEX_SIZE_DEG) {
-  // Precise bounds for Wayne County
-  const north = 42.450, south = 42.050;
-  const west = -83.437, east = -82.910;
-  
-  // Calculate hex dimensions
-  const height = hexSize * Math.sqrt(3);
-  const width = hexSize * 2;
+    // Loop through a grid of potential hexagon centers
+    for (let lat = WAYNE_COUNTY_BOUNDS.south; lat < WAYNE_COUNTY_BOUNDS.north; lat += hexHeight / 2) {
+        for (let lon = WAYNE_COUNTY_BOUNDS.west; lon < WAYNE_COUNTY_BOUNDS.east; lon += horizontalSpacing) {
+            
+            // Offset every other row
+            const lonOffset = (Math.floor(lat / (hexHeight / 2)) % 2 === 0) ? 0 : hexWidth / 2;
+            const currentLon = lon + lonOffset;
 
-  const hexes = [];
-  for (let row = 0; row * height + south <= north; row++) {
-    for (let col = 0; col * width + west <= east; col++) {
-      const evenRow = row % 2 === 0;
-      
-      // Base point + hex offset
-      const lng = west + col * width + (evenRow ? 0 : width/2);
-      const lat = south + row * height;
-      
-      // Skip hexes outside Wayne County
-      if (!isHexInWayneCounty([lng, lat])) {
-        continue;
-      }
-      
-      // Generate hex vertices
-      const vertices = [];
-      for (let i = 0; i < 6; i++) {
-        const angle = Math.PI / 3 * i;
-        const vLng = lng + hexSize * Math.cos(angle);
-        const vLat = lat + hexSize * Math.sin(angle) * Math.cos(lat * Math.PI / 180);
-        vertices.push([vLat, vLng]);
-      }
-      vertices.push(vertices[0]); // Close the polygon
-      
-      // Generate mock data for this hex
-      const numDiseases = Math.floor(Math.random() * 3) + 1;
-      const hexDiseases = diseases
-        .sort(() => Math.random() - 0.5)
-        .slice(0, numDiseases)
-        .map(d => ({
-          name: d.name,
-          prevalence: Math.random() * 60 + 20 // 20-80% range
-        }));
+            // Check if the hexagon center is within the land polygon
+            if (isPointInLand(lat, currentLon, WAYNE_LAND_POLYGON)) {
 
-      hexes.push({
-        location: getLocationName([lat, lng]),
-        coordinates: vertices,
-        diseases: hexDiseases,
-        articleCount: Math.floor(Math.random() * 50),
-        googleTrendsScore: Math.random() * 100
-      });
+                // Generate deterministic but varied mock data
+                const googleTrends = (Math.sin(lat * 50) * 50 + 50);
+                const socialChatter = (Math.cos(currentLon * 50) * 400 + 600);
+                const newsArticles = (Math.sin(lat * 20) * Math.cos(currentLon * 20) * 20 + 25);
+
+                // Composite Health Signal Index (HSI)
+                const hsi = (googleTrends * 0.5) + (socialChatter * 0.03) + (newsArticles * 0.2);
+
+                data.push({
+                    id: idCounter++,
+                    coordinates: getHexagonVertices(lat, currentLon, hexRadiusDegrees),
+                    googleTrends: Math.round(googleTrends),
+                    socialMediaChatter: Math.round(socialChatter),
+                    newsArticles: Math.round(newsArticles),
+                    healthSignal: hsi,
+                });
+
+                if (data.length >= rows) {
+                    return data;
+                }
+            }
+        }
     }
-  }
-  return hexes;
+    return data; // Return whatever was generated if rows limit not met
 }
 
-function hexVerts(lat, lng, r) {
-  const v = [];
-  for (let i = 0; i < 6; i++) {
-    const ang = (Math.PI / 3) * i;
-    // For lat/lng coordinate system, we need to adjust the ratio since 
-    // 1 degree of longitude is not equal to 1 degree of latitude
-    const latScale = 1;
-    const lngScale = Math.cos(lat * Math.PI / 180);
-    v.push([
-      lat + (r * Math.cos(ang) * latScale),
-      lng + (r * Math.sin(ang) / lngScale)
-    ]);
-  }
-  return v;
-}
-function randomDiseaseSet() {
-  const pool = ["Hypertension","Diabetes","Obesity","Depression","Asthma","Opioid Use"];
-  const n = Math.floor(Math.random() * 3) + 3; // 3–5 diseases
-  const shuffled = [...pool].sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, n).map((name) => ({ name, prevalence: Math.floor(Math.random() * 35) + 25 }));
-}
-function determineLocation(lat, lng) {
-  const places = [
-    { name: "Detroit", lat: 42.3314, lng: -83.0458 },
-    { name: "Dearborn", lat: 42.3223, lng: -83.1763 },
-    { name: "Livonia", lat: 42.3678, lng: -83.3527 },
-    { name: "Canton", lat: 42.3095, lng: -83.4822 },
-    { name: "Westland", lat: 42.3239, lng: -83.4005 },
-    { name: "Taylor", lat: 42.2405, lng: -83.2696 },
-    { name: "Hamtramck", lat: 42.3928, lng: -83.0478 },
-    { name: "Grosse Pointe", lat: 42.3861, lng: -82.9116 },
-    { name: "Romulus", lat: 42.2228, lng: -83.3966 },
-    { name: "Highland Park", lat: 42.4053, lng: -83.0968 },
-  ];
-  let best = places[0];
-  let dmin = dist(lat, lng, best.lat, best.lng);
-  for (let i = 1; i < places.length; i++) {
-    const d = dist(lat, lng, places[i].lat, places[i].lng);
-    if (d < dmin) { dmin = d; best = places[i]; }
-  }
-  return best.name;
-}
-function dist(a, b, c, d) {
-  const dx = a - c, dy = b - d;
-  return Math.sqrt(dx * dx + dy * dy);
-}
+// Generate and export the data
+export const healthHexbinData = generateHexbinData(10000);
